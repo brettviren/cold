@@ -70,64 +70,68 @@ def load_test(device, npz_file):
     # go to 0.5us ticks
     # 210 total rows, 21 after decimation
     # 200 total columns
-    r0fine = dat['resp0']
-    chirp ('loaded response')
-    r0 = r0fine.reshape((r0fine.shape[0], r0fine.shape[1]//nfineticksperadctick,-1)).sum(axis=1)
-    chirp ('rebinned response')
-    r0 = torch.tensor(r0, device=device)
-    chirp ('loaded to gpu')
+    plane_wires = list()
+    for iplane in range(3):
 
-    # big array to hold ionization electron raster 
-    ion_field = torch.zeros((nwires*nimperwire, nticks), device='cpu')
-    chirp('initialized ionization field on cpu')
+        r0fine = dat['resp%d'%iplane]
+        chirp ('loaded response')
+        r0 = r0fine.reshape((r0fine.shape[0], r0fine.shape[1]//nfineticksperadctick,-1)).sum(axis=1)
+        chirp ('rebinned response')
+        r0 = torch.tensor(r0, device=device)
+        chirp ('loaded to gpu')
 
-    # p in mm, t in us
-    Depo = namedtuple('Depo','n p t dp dt')
-    depos = [
-        Depo(5000, 0.0, 0.0, 1.0, 1.0),
-        Depo(1000, 1000.0, 1000.0, 3.0, 2.0),
-    ]
-    for depo in depos:
-        p_range = [int(math.floor(max(0, depo.p - nsigma*depo.dp)/imp_pitch)),
-                   int(math.ceil(min(max_pitch, depo.p + nsigma*depo.dp)/imp_pitch))]
-        t_range = [int(math.floor(max(0, depo.t - nsigma*depo.dt)/tick)),
-                   min(nticks, round((depo.t + nsigma*depo.dt)/tick))]
-        for imp in range(*p_range): # span transverse/pitch dimension
-            p = imp*imp_pitch
-            dp = p - depo.p
-            n = depo.n * (0.5/depo.dp) * math.exp(-dp*dp/(2*depo.dp*depo.dp))
-            for itick in range(*t_range): # span drift/tick dimension
-                t = itick*tick
-                dt = t - depo.t
-                q = n * (0.5/depo.dt) * math.exp(-dt*dt/(2*depo.dt*depo.dt))
-                ion_field[imp, itick] += q
-    chirp ("made depos")
+        # big array to hold ionization electron raster 
+        ion_field = torch.zeros((nwires*nimperwire, nticks), device='cpu')
+        chirp('initialized ionization field on cpu')
 
-    ion_specs = list()
-    for imp in range(nimperwire):
-        byimp = ion_field[imp::nimperwire, :]
-        work = torch.zeros(work_shape, device=device)
-        work[:byimp.shape[0], :byimp.shape[1]] = byimp;
-        byimp_c = torch.stack((work, torch.zeros_like(work)), 2)
-        spec = torch.fft(byimp_c, 2)
-        ion_specs.append(spec)
+        # p in mm, t in us
+        Depo = namedtuple('Depo','n p t dp dt')
+        depos = [
+            Depo(5000, 0.0, 0.0, 1.0, 1.0),
+            Depo(1000, 1000.0, 1000.0, 3.0, 2.0),
+        ]
+        for depo in depos:
+            p_range = [int(math.floor(max(0, depo.p - nsigma*depo.dp)/imp_pitch)),
+                       int(math.ceil(min(max_pitch, depo.p + nsigma*depo.dp)/imp_pitch))]
+            t_range = [int(math.floor(max(0, depo.t - nsigma*depo.dt)/tick)),
+                       min(nticks, round((depo.t + nsigma*depo.dt)/tick))]
+            for imp in range(*p_range): # span transverse/pitch dimension
+                p = imp*imp_pitch
+                dp = p - depo.p
+                n = depo.n * (0.5/depo.dp) * math.exp(-dp*dp/(2*depo.dp*depo.dp))
+                for itick in range(*t_range): # span drift/tick dimension
+                    t = itick*tick
+                    dt = t - depo.t
+                    q = n * (0.5/depo.dt) * math.exp(-dt*dt/(2*depo.dt*depo.dt))
+                    ion_field[imp, itick] += q
+        chirp ("made depos")
 
-    chirp ("depo ffts done")
+        wires = torch.zeros(work_shape, device=device)
+        chirp ("made result array on device")
 
-    wires = torch.zeros(work_shape, device=device)
+        for imp in range(nimperwire):
 
-    # The convolution is interleaved by impact position.
-    for imp in range(10):
-        byimp = torch.zeros(work_shape, device=device)
-        r = r0[imp::10,:]
-        byimp[:r.shape[0], :r.shape[1]] = r
-        r_byimp_c = torch.stack((byimp, torch.zeros_like(byimp)), 2)
-        s_byimp_c = torch.fft(r_byimp_c, 2)
+            # ionization
+            ion_work = torch.zeros(work_shape, device=device)
+            ion_byimp = ion_field[imp::nimperwire, :]
+            ion_work[:ion_byimp.shape[0], :ion_byimp.shape[1]] = ion_byimp;
+            ion_byimp_c = torch.stack((ion_work, torch.zeros_like(ion_work)), 2)
+            ion_spec = torch.fft(ion_byimp_c, 2)
 
-        wires += torch.ifft(s_byimp_c * ion_specs[imp], 2)[:,:,0] # accumulate real part
+            # detector response
+            r_byimp = torch.zeros(work_shape, device=device)
+            r = r0[imp::10,:]
+            r_byimp[:r.shape[0], :r.shape[1]] = r
+            r_byimp_c = torch.stack((r_byimp, torch.zeros_like(r_byimp)), 2)
+            s_byimp_c = torch.fft(r_byimp_c, 2)
+
+            wires += torch.ifft(s_byimp_c * ion_spec, 2)[:,:,0] # accumulate real part
+
+        plane_wires.append(wires.cpu());
+
     chirp("done calculation")
-    w = wires.cpu().numpy()
-    chirp("result on cpu")
+
+    w = plane_wires[0].numpy()
     plt.imshow(w[100:300, 1800:2200])
     plt.colorbar()
     plt.savefig("foo.pdf")
