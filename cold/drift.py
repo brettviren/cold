@@ -19,8 +19,8 @@ def points(xyzqt, respx=0*units.mm, fluctuate=True, **params):
     Point tensor is assumed to be shaped (N,5) with columns holding
     (x,y,z,q,t) in system of units.
 
-    Return a new tensor shaped (N,3) with the columns holding
-    (dlong,dtrans,qnew).
+    Return a new tensor shaped (N,4) with the columns holding
+    (dlong,dtrans,tnew,qnew).
 
     Note, the input tensor is not modified but the caller should
     understand that the x coordinates for any future use of the
@@ -34,6 +34,7 @@ def points(xyzqt, respx=0*units.mm, fluctuate=True, **params):
 
     # dt can be negative if the point must "back up" to the respx.
     dt = (respx - x)/params['speed']; 
+    tnew = t + dt
     dtabs = torch.abs(dt)
 
     absorbprob = 1 - torch.exp((-1.0/params['lifetime'])*dtabs)
@@ -47,5 +48,11 @@ def points(xyzqt, respx=0*units.mm, fluctuate=True, **params):
     n = dL.shape[0]
     return torch.cat((dL.reshape(1,-1),
                       dT.reshape(1,-1),
+                      tnew.reshape(1,-1),
                       Qf.reshape(1,-1))).T
+    
+
+def plot(depos):
+    plt.plot(depos[:,2].cpu(), depos[:,1].cpu(), '.')
+    plt.plot(depos[:,2].cpu(), depos[:,0].cpu(), '.')
     
