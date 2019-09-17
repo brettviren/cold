@@ -1,0 +1,90 @@
+#+title COLD Simulation
+
+* Overview
+
+LArTPC detector simulation follows actions with names that are coerced
+into the "4 Ds":
+
+- depositing :: point ionization depositions are provided as input.
+                These are a set of 5-tuples, 3D Cartesian points, a
+                time and a number of ionized electrons at that
+                space-time point.
+
+- drifting :: the effects of drifting in the LAr are applied to the
+           depos.  These effects include translation in space and time
+           to a common "response plane" near the wires, reduction in
+           number of electrons due to electron lifetime in the LAr,
+           and electron diffusion modeled as a 2D Gaussian
+           distribution in the directions transverse to and
+           longitudinal with the nominal drift direction and
+           optionally statistical fluctuation.  The result of this
+           step is conceptually a 2D scalar field specifying the
+           number of ionization electrons as a function of time and
+           transverse position in the response plane.  The storage
+           representation is that of a 4-tuple giving the Gaussian
+           means and sigmas in this 2D transverse vs longitudinal
+           space.
+
+- ducting :: the convolution of the drifted ionization electron
+             distribution with a model of the detector response.  This
+             model consists of two parts.  The first part is a 1D
+             function modeling the response of electronics to the
+             input of current.  This single 1D function is convolved
+             along the longitudinal component of the second part.  The
+             second part consists of a set of 2D "field response
+             functions" which give, as a function of transverse and
+             longitudinal coordinates at the "response plane", the
+             contribution to the induced current on the nearby wires
+             to drifted ionization electrons.  These functions are
+             broken up into N=10 individual 2D scalar fields by their
+             "impact bin".  These impact bins partition the region
+             extending to one half pitch on either side of a wire.
+             The "duction" transform thus involves striping the
+             drifted ionization electron distribution on a
+             per-impact-bin basis, convolving each stripe with the
+             corresponding response and summing over stripes to get a
+             per wire waveform (in units of Volts).
+
+- digitizing :: a wire-channel map is applied to the previous result
+                to collect partial voltage waveforms on common
+                conductors and a model of an ADC is applied to produce
+                an integer scalar field of ADC samples as a function
+                of channel and sample time ("tick").
+
+* Details
+
+The following figure gives implementation details.
+
+[[./dag.svg]]
+
+The ellipses represent data in the form of 1-D tensors of size
+$N_{depo}$.  The boxes are functional nodes.  Source of depos provides
+tensors ~{x,y,z,t,q}~.  The longitudinal information and charge is sent
+through drifting to give longitudinal (~dT~, "T" means time) and
+transverse (~dP~, "P" means pitch) Gaussian widths as well as new time
+and charge values.  The two transverse coordinates are transformed
+into a pitch location (~Pdrift~) on a per-plane basis.  At this point,
+only plane 0 is detailed in the diagram.  The longitudinal (time) and
+transverse (pitch) mean and sigma are converted into tensors holding
+per-depo "binning" values.  
+
+In the ~duct~ node, two binnings are "crossed" to form a meshgrid of
+(T,P) coordinates spanning the 2D Gaussian up to the given ~nsigma~.  As
+a detail, the P binning is striped by the impact position.  The
+contribution from one impact position across all depos is computed and
+accumulated.  This awkward loop ordering is done for two reasons.
+First, the convolution with the detector response is simple (able to
+use FFT) only when done on the basis of a common impact position and
+second to fully inflate a 2D array that spans all T and P (including
+all impact bins) would require a large GPU RAM burden (eg, around 500
+MB for one PDSP wire plane).  Optionally, and particularly in the
+middle of the FFTs, the ~duct~ node may apply a noise model.
+
+Result is a dense 2D array of voltage samples across wire and time.
+These arrays from all planes are merged using a wire-channel map, a
+model of the ADC is applied and a resulting 16 bit integer tensor
+spanning channel and time is output.
+
+
+
+

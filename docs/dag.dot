@@ -1,0 +1,44 @@
+digraph dag {
+        node[shape=box]
+        depo[label="depo source"]
+        drift[label="drift(x_resp)"]
+        duct0[label="duct(plane=0)\n(for imp in range(10))"]
+        //duct1[label="duct(plane=1)"]
+        //duct2[label="duct(plane=2)"]
+        trans0[label="trans(plane=0)"]
+        trans1[label="trans(plane=1)"]
+        trans2[label="trans(plane=2)"]
+        tbinning[label="t_binning()"]
+        pbinning0[label="p_binning(plane=0)"]
+        pbinning1[label="p_binning(plane=1)"]
+        pbinning2[label="p_binning(plane=2)"]
+        wirechan[label="wire-channel map\nADC model"]
+
+        node[shape=ellipse]
+        pitch0[label="Pdrift\n(plane 0)"]
+        pitch1[label="Pdrift\n(plane 1)"]
+        pitch2[label="Pdrift\n(plane 2)"]
+
+        volts0[label="V-waveforms\n(plane0)"]
+        volts1[label="V-waveforms\n(plane1)"]
+        volts2[label="V-waveforms\n(plane2)"]
+
+        adc[label="ADC-waveforms"]
+
+        depo->{x,y,z,t,q}
+        {x,t,q}->drift->{Tdrift,Qdrift,dP,dT}
+
+        {y,z}->trans0->{pitch0}
+        {y,z}->trans1->{pitch1}
+        {y,z}->trans2->{pitch2}
+
+        {Tdrift,dT}->tbinning->{nTbins,Tmin,Tmax}
+        {pitch0,dP}->pbinning0->{nPbins,Pmin,Pmax}
+
+        {nTbins,Tmin,Tmax,nPbins,Pmin,Pmax,Qdrift}->duct0
+
+        duct0->volts0
+
+        {volts0,volts1,volts2}->wirechan->adc
+
+}

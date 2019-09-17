@@ -14,8 +14,8 @@ def load_bee(filename, charge_key='q', device="cuda"):
     Return tuple (dict, tensor)
 
     The dict holds scalar attribtes from the file and the tensor is 2D
-    of shape (4,N) holding N depos as (x,y,z,q).  Note, no time is
-    provided by Bee files.
+    of shape (5,N) holding N depos as (x,y,z,q,t).  Note, no time is
+    provided by Bee files but the "t" column of zeros is added.
     '''
     dat = json.load(open(filename))
     ret = list()
@@ -39,3 +39,22 @@ def load_bee(filename, charge_key='q', device="cuda"):
 
     return (dat, t.T)
 
+class BeeFiles(object):
+    charge_key = 'q'
+    device = 'cuda'
+    dtype = torch.float
+
+    def __init__(self, **params):
+        self.__dict__.update(**params)
+
+    def __call__(self, filename):
+        dat = json.load(open(filename))
+        ret = dict()
+        for key in 'xyz':
+            ret[key] = units.cm*torch.tensor(dat[key],
+                                             device=self.device,
+                                             dtype=self.dtype)
+        ret['q'] = torch.tensor(dat[self.charge_key],
+                                device=self.device,
+                                dtype=self.dtype)
+        return ret

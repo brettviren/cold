@@ -10,6 +10,8 @@ import numpy
 import matplotlib.pyplot as plt
 from collections import namedtuple
 
+from .util import Chirp
+
 @click.group()
 @click.pass_context
 def cli(ctx):
@@ -26,6 +28,171 @@ def check_torch():
     else:
         click.echo ("no CUDA")
     return
+
+
+@cli.command("check-bee")
+@click.option("-d","--device", default="cuda",
+              type=click.Choice(['cuda','cpu']),
+              help="the 'gpu' device to use")
+@click.argument("bee-file")
+@click.argument("pdf-file")
+def check_bee(device, bee_file, pdf_file):
+    '''
+    Load a bee file, plot it
+    '''
+    chirp = Chirp("bee: ")
+    torch.tensor([0,], device=device)
+    chirp('warm up device "%s", reset time' % device)
+    chirp.reset()
+    from cold import io
+    meta, xyzqt = io.load_bee(bee_file,device=device)
+    chirp("loaded %s from %s" % (xyzqt[:0].size(), bee_file))
+
+    pts = xyzqt.cpu().numpy()
+    chirp("convert to numpy")
+
+    fig, axes = plt.subplots(2,2)
+    bins = 100
+    axes[0,0].hist2d(pts[:,0], pts[:,1],bins)
+    axes[0,1].hist2d(pts[:,0], pts[:,2],bins)
+    axes[1,0].hist2d(pts[:,2], pts[:,1],bins)
+    axes[1,1].hist(pts[:,3],bins,log=True)
+    plt.savefig(pdf_file)
+    chirp("done")
+
+
+
+@cli.command("test")
+@click.option("-d","--device", default="cuda",
+              type=click.Choice(['cuda','cpu']),
+              help="the 'gpu' device to use")
+@click.argument("wires-file")
+@click.argument("bee-file")
+def check_test(device, wires_file, bee_file):
+    from cold import io, drift, wires, units, binning, ductor
+
+    # static wire data
+    chmap = wires.pdsp_channel_map(wires_file)
+    all_pimpos = wires.pdsp_pimpos(chmap)
+    pimpos = all_pimpos[(1,0)]  # fixme: we just look at one plane now
+    tbinning = binning.Binning(6000,0,3*units.us)
+
+    # nodes
+    bee = io.BeeFiles(device=device)
+    drifter = drift.Drifter(respx = pimpos.origin[0] + 10*units.cm) # fixme
+    pitcher = drift.Pitcher(pimpos)
+    duct = ductor.Ductor(pimpos, tbinning)
+
+    # run graph
+    points = bee(bee_file)
+    # bee has no time, make up something
+    points['t'] = torch.zeros_like(points['x'])
+
+    drifted = drifter(**points)
+    print (list(drifted.keys()))
+    pitched = pitcher(**points)
+    print (list(pitched.keys()))
+    all_arrays = dict()         # fixme: better to delete what isn't needed
+    all_arrays.update(**drifted)
+    all_arrays.update(**pitched)    
+    duct(**all_arrays)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+@cli.command("check-drift")
+@click.option("-d","--device", default="cuda",
+              type=click.Choice(['cuda','cpu']),
+              help="the 'gpu' device to use")
+@click.argument("bee-file")
+@click.argument("pdf-file")
+def check_drift(device, bee_file, pdf_file):
+    '''
+    Load a bee file, plot it
+    '''
+    chirp = Chirp("drift: ")
+    torch.tensor([0,], device=device)
+    chirp('warm up device "%s", reset time' % device)
+    chirp.reset()
+    from cold import io, drift
+    meta, xyzqt = io.load_bee(bee_file,device=device)
+    chirp("loaded %s from %s" % (xyzqt[:0].size(), bee_file))
+    drifted = drift.points(xyzqt)
+    chirp("drifted")
+
+    dlong,dtrans,tnew,qnew = drifted.T.cpu().numpy()
+    x,y,z,q,t = xyzqt.T.cpu().numpy()
+    
+    fig, axes = plt.subplots(2,2)
+    bins = 100
+    axes[0,0].hist(x-tnew, bins)
+    axes[1,0].hist2d(tnew, dlong, bins)
+    axes[1,1].hist2d(tnew, dtrans, bins)
+    axes[0,1].hist2d((q-qnew)/q, x, bins)
+
+    plt.savefig(pdf_file)
+    chirp("done")
+
+@cli.command("check-splat")
+@click.option("-d","--device", default="cuda",
+              type=click.Choice(['cuda','cpu']),
+              help="the 'gpu' device to use")
+@click.argument("bee-file")
+@click.argument("pdf-file")
+def check_splat(device, bee_file, pdf_file):
+    chirp = Chirp("splat: ")
+    torch.tensor([0,], device=device)
+    chirp('warm up device "%s", reset time' % device)
+    chirp.reset()
+
+    from cold import io, drift, splat, util
+    meta, xyzqt = io.load_bee(bee_file,device=device)
+    chirp("loaded %s from %s" % (xyzqt[:0].size(), bee_file))
+
+    drifted = drift.points(xyzqt)
+    chirp("drifted")
+
+    depos = util.point_drifted_depos(xyzqt, drifted, None)
+    chirp("converted")
+
+    # test pitch
+    pbounds = torch.tensor((0.0,1000.0))
+    pbb = splat.binning_bounds(depos[:,2], 3*depos[:,4], pbounds, 0.5, 10)
+    chirp(str(pbb.shape))
+
+    field = torch.zeros((10000,10000), device=device)
+
+    nimperwire = 10
+
+    noob = 0
+    # (integral, r_center, c_center, r_sigma, c_sigma)
+    for depo in depos:
+        orig, patch = splat.full_patch(depo)
+        irow,icol = map(int, orig)
+        nrow,ncol = map(int, patch.shape)
+
+        if irow < 0 or icol < 0 or irow+nrow >= 10000 or icol+ncol >= 10000:
+            noob += 1
+            continue
+
+        field[irow:irow+nrow, icol:icol+ncol] += patch
+
+    chirp("out of bounds: %d" % noob)
+    plt.imshow(field.cpu())
+    plt.colorbar()
+    plt.savefig(pdf_file)
+    chirp("done")
 
 @cli.command("load")
 @click.option("-d","--device", default="cuda",

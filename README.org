@@ -1,0 +1,23 @@
+#+title: COLD
+
+CUDA Operations for Liquid argon Detector is a contrived acronym 
+
+* What
+
+Experimental reimplementation of some Wire-Cell Toolkit algorithms using PyTorch
+
+* Why
+
+Some expensive WCT algorithms are amenable to running on GPU.  This package prototypes that offloading.
+
+* How
+
+#+begin_example
+  $ git clone https://github.com/brettviren/cold.git
+  $ python3 -m venv venv
+  $ source venv/bin/activate
+
+  $ cd cold
+  $ python setup.py develop
+  $ cold --help
+#+end_example
