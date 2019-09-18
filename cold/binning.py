@@ -46,7 +46,7 @@ class Binning(object):
 
     def bin_trunc(self, pos):
         'Return the bin containing the position(s) truncating to be in the binning'
-        bounds = torch.tensor([0,self.nbins-1]).type(torch.int)
+        bounds = torch.tensor([0,self.nbins-1], device=pos.device).type(torch.int)
         full = self.bin(pos)
         full = torch.max(full, bounds[0].expand_as(full))
         full = torch.min(full, bounds[1].expand_as(full))
@@ -71,4 +71,20 @@ class Binning(object):
         return self.minedge + find * self.binsize
 
 
+        
+class WidthBinning(object):
+
+    binning = None
+    nsigma = 3.0
+
+    def __init__(self, binning, **kwds):
+        self.binning = binning
+        self.__dict__.update(**kwds)
+
+    def __call__(self, means, halfwidths, **kwds):
+        min_bin = binning.bin_trunc(means - self.nsigma*halfwidths)
+        max_bin = binning.bin_trunc(means + self.nsigma*halfwidths)
+        return {"min":binning.edge(min_bin),
+                "max":binning.edge(max_bin+1),
+                "nbins": max_bin - min_bin + 1}
         

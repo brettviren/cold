@@ -3,6 +3,7 @@
 Operations with wires.
 '''
 import math
+from collections import defaultdict
 import torch
 from .binning import Binning
 from . import units
@@ -92,7 +93,11 @@ class Pimpos(object):
         return torch.sum(v * self.axis[2], points.dim()-1)
         
 
-def pdsp_channel_map(filename):
+
+# detector description.  fixme: refactor this to come from a cold.detectors.<name>.Geometry object
+
+
+def pdsp_channel_map(filename, device):
     '''
     Read in a PDSP wire dump file with columns:
 
@@ -110,8 +115,8 @@ def pdsp_channel_map(filename):
         parts = line.split()
         channel = int(parts[0])
         key = tuple(map(int, parts[1:4]))
-        ray = torch.tensor(list(map(float, parts[4:])), dtype=torch.float).reshape((2,3))
-        channel_map[key] = (channel,ray)
+        ray = torch.tensor(list(map(float, parts[4:])), device=device, dtype=torch.float).reshape((2,3))
+        channel_map[key] = (channel,ray*units.cm)
     return channel_map
 
 def pdsp_pimpos(chmap):
@@ -123,7 +128,66 @@ def pdsp_pimpos(chmap):
     ret = dict()
     for tpc in range(12):
         for plane,mm in enumerate([(0,1147), (0,1147), (0,479)]):
-            tail = chmap[(tpc,plane,mm[0])][1]
-            head = chmap[(tpc,plane,mm[1])][1]
-            ret[(tpc,plane)] = Pimpos(mm[1]+1, torch.stack((tail,head)))
+            w0 = chmap[(tpc,plane,mm[0])][1]
+            wL = chmap[(tpc,plane,mm[1])][1]
+            ret[(tpc,plane)] = Pimpos(mm[1]+1, torch.stack((w0,wL)))
     return ret
+
+class BoundingBox(object):
+    def __init__(self):
+        self.minp = None
+        self.maxp = None
+
+    def add_ray(self, ray):
+        'Add ray tensor of shape (2,3) to bounding box'
+        self.add_point(ray[0])
+        self.add_point(ray[1])
+    def add_point(self, pt):
+        'Add pt tensor of shape (3) to bounding box'
+        if self.minp is None:
+            self.minp = pt
+            self.maxp = pt
+            return
+        self.minp = torch.min(self.minp, pt)
+        self.maxp = torch.max(self.maxp, pt)
+
+    def center(self):
+        return 0.5*(self.minp+self.maxp)
+        
+    def inside(self, xyz):
+        '''
+        Return Boolean tensor of shape (N) for xyz tensor of shape (N,3)
+        '''
+        print (xyz)
+        return ((self.minp <= xyz) * (xyz <= self.maxp)).all(1)
+
+def pdsp_bounds(chmap):
+    '''
+    Return dict mapping:
+
+    (tpc,plane) -> boundingbox
+    '''
+    ret = defaultdict(BoundingBox)
+
+    # (tpc,plane,wire)->(channel, wire_ray)
+    for (t,p,w), (ch,ray) in chmap.items():
+        ret[(t,p)].add_ray(ray)
+    # map TPC number to cathode x position.  This is taken the
+    # "volumes" attribute from WCT params.jsonnet for PDSP.
+    cathodes = {
+        1: -25.4*units.mm,
+        2: +25.4*units.mm,
+        5: -25.4*units.mm,
+        6: +25.4*units.mm,
+        9: -25.4*units.mm,
+        10: +25.4*units.mm,
+    }
+    for tpc,cat in cathodes.items():
+        for p in range(3):
+            c = ret[(tpc,p)].center()
+            c[0] = cat
+            ret[(tpc,p)].add_point(c)
+        
+        
+    return ret
+    

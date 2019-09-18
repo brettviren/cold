@@ -2,8 +2,30 @@
 '''
 Utility functions
 '''
+import math
 import time
 import torch
+
+def fftsize(n):
+    '''
+    Return a "good" FFT size no smaller than n.
+    '''
+    l2 = int(math.floor(math.log2(n)))
+    if n == 2**l2:
+        return n
+
+    # for now, just return the next higher power-of-two.  This will
+    # lead to extra large arrays.  Some powers-of-small-primes could
+    # be allowed.  WCT has a list of these which were identified
+    # emperically and exhaustively using FFTW3/CPU speed tests.
+    return 2**(l2+1)
+    
+
+def gauss(mean, sigma, meshgrid):
+    'Calculate a gaussian on the given meshgrid'
+    rel = (meshgrid-mean)/sigma
+    return 0.5*sigma * torch.exp(-0.5*rel*rel);    
+
 
 def point_drifted_depos(points, drifted, plane):
     '''

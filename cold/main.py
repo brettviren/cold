@@ -67,31 +67,49 @@ def check_bee(device, bee_file, pdf_file):
               type=click.Choice(['cuda','cpu']),
               help="the 'gpu' device to use")
 @click.argument("wires-file")
+@click.argument("response-file")
 @click.argument("bee-file")
-def check_test(device, wires_file, bee_file):
+def check_test(device, wires_file, response_file, bee_file):
     from cold import io, drift, wires, units, binning, ductor
 
-    # static wire data
-    chmap = wires.pdsp_channel_map(wires_file)
+    # detector description.  fixme: refactor this to come from a cold.detectors.<name>.Geometry object
+    wire_plane = (1,0) # fixme: we just look at one plane now
+    chmap = wires.pdsp_channel_map(wires_file, device)
     all_pimpos = wires.pdsp_pimpos(chmap)
-    pimpos = all_pimpos[(1,0)]  # fixme: we just look at one plane now
-    tbinning = binning.Binning(6000,0,3*units.us)
+    pimpos = all_pimpos[wire_plane]  
+    tbinning = binning.Binning(6000,0,3*units.ms)
+    bbs = wires.pdsp_bounds(chmap)
+    bb0 = bbs[wire_plane]
+    print ("bb0:",bb0.minp, bb0.maxp)
+
+    # response data
+    res = numpy.load(response_file)
+    # fixme: we just look at one plane now
+    res0 = torch.tensor(res['resp0'], dtype=torch.float, device=device) 
+
 
     # nodes
     bee = io.BeeFiles(device=device)
     drifter = drift.Drifter(respx = pimpos.origin[0] + 10*units.cm) # fixme
     pitcher = drift.Pitcher(pimpos)
-    duct = ductor.Ductor(pimpos, tbinning)
+    duct = ductor.Ductor(pimpos, tbinning, res0)
+
 
     # run graph
     points = bee(bee_file)
-    # bee has no time, make up something
-    points['t'] = torch.zeros_like(points['x'])
+    xyzq = torch.stack((points['x'], points['y'], points['z'], points['q'])).T
+    print("all points:",xyzq.shape[0])
+    intpc = bb0.inside(xyzq[:,:3])
+    xyzq = xyzq[intpc,:]
+    print("points in TPC:",xyzq.shape[0])
+    assert xyzq.shape[0] > 0
+    x,y,z,q = xyzq.T
+    t = torch.zeros_like(x)
 
-    drifted = drifter(**points)
-    print (list(drifted.keys()))
-    pitched = pitcher(**points)
-    print (list(pitched.keys()))
+    drifted = drifter(x, t, q)
+    print ("<dP[mm]>:",torch.sum(drifted['dP']*units.mm)/len(drifted['dP']))
+    pitched = pitcher(y,z)
+    print ("Pdrift[mm]:",pitched['Pdrift']*units.mm)
     all_arrays = dict()         # fixme: better to delete what isn't needed
     all_arrays.update(**drifted)
     all_arrays.update(**pitched)    
