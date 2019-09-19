@@ -158,7 +158,6 @@ class BoundingBox(object):
         '''
         Return Boolean tensor of shape (N) for xyz tensor of shape (N,3)
         '''
-        print (xyz)
         return ((self.minp <= xyz) * (xyz <= self.maxp)).all(1)
 
 def pdsp_bounds(chmap):

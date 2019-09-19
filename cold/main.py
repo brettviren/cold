@@ -70,6 +70,11 @@ def check_bee(device, bee_file, pdf_file):
 @click.argument("response-file")
 @click.argument("bee-file")
 def check_test(device, wires_file, response_file, bee_file):
+    chirp = Chirp("stest: ")
+    torch.tensor([0,], device=device)
+    chirp('warm up device "%s", reset time' % device)
+    chirp.reset()
+
     from cold import io, drift, wires, units, binning, ductor
 
     # detector description.  fixme: refactor this to come from a cold.detectors.<name>.Geometry object
@@ -80,20 +85,26 @@ def check_test(device, wires_file, response_file, bee_file):
     tbinning = binning.Binning(6000,0,3*units.ms)
     bbs = wires.pdsp_bounds(chmap)
     bb0 = bbs[wire_plane]
-    print ("bb0:",bb0.minp, bb0.maxp)
+    print ("bb0[m]:",bb0.minp/units.m, bb0.maxp/units.m)
+    print ("pitch[mm]:",
+            pimpos.region_binning.minedge*units.mm,
+            pimpos.region_binning.maxedge*units.mm)
+    chirp("load 'geometry'")
 
     # response data
     res = numpy.load(response_file)
     # fixme: we just look at one plane now
     res0 = torch.tensor(res['resp0'], dtype=torch.float, device=device) 
-
+    chirp("load response")
 
     # nodes
     bee = io.BeeFiles(device=device)
-    drifter = drift.Drifter(respx = pimpos.origin[0] + 10*units.cm) # fixme
+    drifter = drift.Drifter(respx = pimpos.origin[0] + 10*units.cm, positive_facing=True) # fixme
     pitcher = drift.Pitcher(pimpos)
+    tbinner = binning.WidthBinning(tbinning)
+    pbinner = binning.WidthBinning(pimpos.region_binning)
     duct = ductor.Ductor(pimpos, tbinning, res0)
-
+    chirp("make nodes")
 
     # run graph
     points = bee(bee_file)
@@ -103,25 +114,37 @@ def check_test(device, wires_file, response_file, bee_file):
     xyzq = xyzq[intpc,:]
     print("points in TPC:",xyzq.shape[0])
     assert xyzq.shape[0] > 0
+
     x,y,z,q = xyzq.T
     t = torch.zeros_like(x)
+    print ("x[m]:", torch.min(x)/units.m, torch.max(x)/units.m)
+    chirp("load points")
 
     drifted = drifter(x, t, q)
-    print ("<dP[mm]>:",torch.sum(drifted['dP']*units.mm)/len(drifted['dP']))
     pitched = pitcher(y,z)
-    print ("Pdrift[mm]:",pitched['Pdrift']*units.mm)
-    all_arrays = dict()         # fixme: better to delete what isn't needed
-    all_arrays.update(**drifted)
-    all_arrays.update(**pitched)    
-    duct(**all_arrays)
+
+    print ("Pdrift[mm]:",torch.min(pitched['Pdrift']), torch.max(pitched['Pdrift']))
+    print ("<dP[mm]>:",torch.sum(drifted['dP']*units.mm)/len(drifted['dP']))
+    print ("Tdrift[us]:",torch.min(drifted['Tdrift']), torch.max(drifted['Tdrift']))
+    print ("<dT[us]>:",torch.sum(drifted['dT']*units.us)/len(drifted['dT']))
+    chirp("drifted and pitched")
+
+    tbins = tbinner(drifted['Tdrift'], drifted['dT'])
+    pbins = pbinner(pitched['Pdrift'], drifted['dP'])
+    chirp("binned")
+
+    print (drifted['Tdrift'], drifted['dT'])
+    print (tbins)
 
 
+    signals = duct(drifted['Qdrift'],
+                   drifted['Tdrift'], drifted['dT'],
+                   pitched['Pdrift'], drifted['dP'],
+                   tbins['bins'], tbins['span'],
+                   pbins['bins'], pbins['span'])
 
-
-
-
-
-
+    print (signals)
+    chirp("done")
 
 
 

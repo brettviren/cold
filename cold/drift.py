@@ -10,7 +10,10 @@ class Drifter(object):
     A callable that drifts point charges
     '''
 
-    respx = 0*units.mm
+    respx = 0.0*units.mm
+    # True if wire plane face points in postive X direction
+    positive_facing = True      
+
     DL=7.2*units.cm**2/units.s
     DT=12.0*units.cm**2/units.s
     lifetime = 8*units.ms
@@ -24,7 +27,14 @@ class Drifter(object):
 
     def __call__(self, x, t, q, **kwds):
 
-        dt = (self.respx - x)/self.speed
+        if self.positive_facing:
+            backup = x < self.respx
+            driftsign = +1.0
+        else:
+            backup = x > self.respx
+            driftsign = -1.0
+
+        dt = driftsign*(x - self.respx)/self.speed
         tnew = t + dt
         dtabs = torch.abs(dt)
 
@@ -35,6 +45,11 @@ class Drifter(object):
 
         dlong = torch.sqrt(2.0*self.DL*dtabs)
         dtran = torch.sqrt(2.0*self.DT*dtabs)
+
+        # except we undo for backups
+        Qf[backup] = q[backup]
+        dlong[backup] = 0.0
+        dtran[backup] = 0.0
 
         return dict(dT=dlong, dP=dtran, Qdrift=Qf, Tdrift=tnew)
     

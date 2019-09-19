@@ -3,6 +3,7 @@
 Convolve drifted ionization electron distributions and field response.
 '''
 import torch
+from time import time
 from . import units
 from .util import fftsize, gauss
 
@@ -20,32 +21,21 @@ class Ductor(object):
         self.response = response
         self.__dict__.update(**params)
 
-    def __call__(self, Qdrift, Tdrift, Pdrift, dT, dP, **kwds):
+    def __call__(self, Qdrift,
+                 Tdrift, dT,
+                 Pdrift, dP, 
+                 tbins, tspan,
+                 pbins, pspan, **kwds):
 
         rb = self.pimpos.region_binning
         ib = self.pimpos.impact_binning
         tb = self.tbinning
 
-        pmin_bin = ib.bin_trunc(rb.edge(rb.bin(Pdrift - self.nsigma*dP)    ))
-        pmax_bin = ib.bin_trunc(rb.edge(rb.bin(Pdrift + self.nsigma*dP) + 1)) + 1
-        pnbins = pmax_bin - pmin_bin
-        pmin = ib.edge(pmin_bin)
-        pmax = ib.edge(pmax_bin)
+        tbin0,tnbins = tbins.T
+        tmin,tmax = tspan.T
 
-        tmin_bin = tb.bin_trunc(Tdrift - self.nsigma*dT)
-        tmax_bin = tb.bin_trunc(Tdrift + self.nsigma*dT) + 1
-        tnbins = tmax_bin - tmin_bin
-        tmin = tb.edge(tmin_bin)
-        tmax = tb.edge(tmax_bin)
-
-        good = Qdrift > self.minq
-        good *= pmin_bin >= 0
-        good *= pmax_bin <= rb.nbins
-        good *= tmin_bin >= 0
-        good *= tmax_bin <= tb.nbins
-        good *= pnbins > 1
-        good *= tnbins > 1
-
+        pbin0,pnbins = pbins.T
+        pmin,pmax = pspan.T
 
         volts = torch.zeros((rb.nbins,tb.nbins), dtype=torch.float, device=Qdrift.device)
 
@@ -65,7 +55,14 @@ class Ductor(object):
         nreswires = round(self.response.shape[0] / nimper)
         # 200
         nresticks = int(self.response.shape[1])
+
+        t_raster = 0
+        t_conv1 = 0
+        t_conv2 = 0
+
         for imp in range(nimper):
+
+            t0 = time()
 
             work_r.zero_()
             work_r[:nreswires, :nresticks] = self.response[imp::nimper]
@@ -73,24 +70,15 @@ class Ductor(object):
             work_c[:,:,0] = work_r
             res_spec = torch.fft(work_c, 2)
 
+            t1 = time()
+            t_conv1 += t1-t0
+            t0 = t1
+
             work_r.zero_()
             # Raster each depo impact slice
             for ind,q in enumerate(Qdrift):
-                if not good[ind]:
-                    continue
-                # fixme: split depos into per-apa units
-                ip = int(pmin_bin[ind])
-                fp = int(pmax_bin[ind])
-                it = int(tmin_bin[ind])
-                ft = int(tmax_bin[ind])
-                if ip < 0 or fp > rb.nbins:
-                    print ("pitch out of bounds: %d - %d" % (ip, fp))
-                    continue
-                if it < 0 or ft > tb.nbins:
-                    print ("tick out of bounds: %d - %d" % (it, ft))
-                    continue
 
-                pls = torch.linspace(pmin[ind], pmax[ind], pnbins[ind], device=Qdrift.device)[imp::nimper]
+                pls = torch.linspace(pmin[ind], pmax[ind], nimper*pnbins[ind], device=Qdrift.device)[imp::nimper]
                 if 0 == len(pls):
                     continue
                 tls = torch.linspace(tmin[ind], tmax[ind], tnbins[ind], device=Qdrift.device)
@@ -98,30 +86,36 @@ class Ductor(object):
                     continue
 
                 pmg, tmg = torch.meshgrid(pls,tls)
-                print ("shapes",imp,ind,pls.shape, tls.shape, pmg.shape,tmg.shape)
                 pgauss = gauss(Pdrift[ind], dP[ind], pmg)
                 tgauss = gauss(Tdrift[ind], dT[ind], tmg)
                 patch = q * pgauss * tgauss
                 patch_tot += float(torch.sum(patch))
 
-
+                ip = int(pbin0[ind])
+                it = int(tbin0[ind])
                 np = int(patch.shape[0])
                 nt = int(patch.shape[1])
                 
                 work_r[ip:ip+np, it:it+nt] += patch
                 qtot += float(q)
 
+            t1 = time()
+            t_raster += t1-t0
+            t0 = t1
+
             work_c.zero_()
             work_c[:,:,0] = work_r
             q_spec = torch.fft(work_c, 2) # torch.stack((work_r, torch.zeros_like(work_r)), 2), 2)
             tmp = torch.ifft(res_spec * q_spec, 2)
             volts += tmp[:rb.nbins, :tb.nbins, 0]
-            #volts += torch.ifft(res_spec * q_spec, 2)[:rb.nbins,:tb.nbins,0]
+
+            t1 = time()
+            t_conv2 += t1-t0
 
             print ("imp:",imp, patch_tot, torch.sum(volts), torch.sum(tmp))
 
 
 
         print ("qtot",qtot,"patch tot",patch_tot)
-        print (volts)
+        print ("raster:",t_raster,"t_conv1",t_conv1,"t_conv2",t_conv2)
         return dict(signals=volts)

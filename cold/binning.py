@@ -73,6 +73,11 @@ class Binning(object):
 
         
 class WidthBinning(object):
+    '''
+    A callable to compute the bin and span of something with a width
+    and a mean.  Both ends of the the span is enlarge to the nearest
+    bin edges.  Result is constrained to be inside the binnning.
+    '''
 
     binning = None
     nsigma = 3.0
@@ -82,9 +87,33 @@ class WidthBinning(object):
         self.__dict__.update(**kwds)
 
     def __call__(self, means, halfwidths, **kwds):
-        min_bin = binning.bin_trunc(means - self.nsigma*halfwidths)
-        max_bin = binning.bin_trunc(means + self.nsigma*halfwidths)
-        return {"min":binning.edge(min_bin),
-                "max":binning.edge(max_bin+1),
-                "nbins": max_bin - min_bin + 1}
+        "Return dictionary of 'span' and 'bins' tensors of shape (N,2)"
+        min_bin = self.binning.bin_trunc(means - self.nsigma*halfwidths)
+        max_bin = self.binning.bin_trunc(means + self.nsigma*halfwidths)
+        return dict(span = torch.stack((self.binning.edge(min_bin), self.binning.edge(max_bin+1))).T,
+                    bins = torch.stack((min_bin, max_bin - min_bin + 1)).T)
+        
+# class DualWidthBinning(object):
+#     '''
+#     A callable to compute the bin and span of something with a width
+#     and a mean.  The span is enlarge to the edge of the nearest coarse
+#     bin edges and the reult is returned in terms of the fine edges.
+#     Result is constrained to be inside the fine binnning.
+#     '''
+
+#     fb = None
+#     cb = None
+#     nsigma = 3.0
+
+#     def __init__(self, fine_binning, coarse_binning, **kwds):
+#         self.fb = fine_binning
+#         self.cb = coarse_binning
+#         self.__dict__.update(**kwds)
+
+#     def __call__(self, means, halfwidths, **kwds):
+#         "Return dictionary of 'span' and 'bins' tensors of shape (N,2)"
+#         min_bin = self.fb.bin_trunc(self.cb.edge(self.cb.bin(means - self.nsigma*halfwidths)))
+#         max_bin = self.fb.bin_trunc(self.cb.edge(self.cb.bin(means + self.nsigma*halfwidths) + 1)) + 1
+#         return dict(span = torch.stack((self.fb.edge(min_bin),self.fb.edge(max_bin+1))).T,
+#                     bins = torch.stack((min_bin, max_bin - min_bin + 1)).T)
         
