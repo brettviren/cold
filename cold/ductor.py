@@ -45,10 +45,6 @@ class Ductor(object):
         work_r = torch.zeros(work_shape, dtype=torch.float, device=Qdrift.device)
         work_c = torch.stack((work_r, torch.zeros_like(work_r)), 2)
 
-        qtot = 0.0
-        patch_tot = 0.0
-        nqless = 0
-
         # 10
         nimper = self.pimpos.nimper 
         # 21
@@ -59,6 +55,11 @@ class Ductor(object):
         t_raster = 0
         t_conv1 = 0
         t_conv2 = 0
+        t_ls = 0
+        t_sum = 0
+        t_mg = 0
+        t_gauss = 0
+        t_patch = 0
 
         for imp in range(nimper):
 
@@ -78,6 +79,8 @@ class Ductor(object):
             # Raster each depo impact slice
             for ind,q in enumerate(Qdrift):
 
+                t0 = time()
+
                 pls = torch.linspace(pmin[ind], pmax[ind], nimper*pnbins[ind], device=Qdrift.device)[imp::nimper]
                 if 0 == len(pls):
                     continue
@@ -85,19 +88,35 @@ class Ductor(object):
                 if 0 == len(tls):
                     continue
 
+                t1 = time()
+                t_ls += t1-t0
+                t0 = t1
+
                 pmg, tmg = torch.meshgrid(pls,tls)
+
+                t1 = time()
+                t_mg += t1-t0
+                t0 = t1
+
                 pgauss = gauss(Pdrift[ind], dP[ind], pmg)
                 tgauss = gauss(Tdrift[ind], dT[ind], tmg)
-                patch = q * pgauss * tgauss
-                patch_tot += float(torch.sum(patch))
 
-                ip = int(pbin0[ind])
-                it = int(tbin0[ind])
-                np = int(patch.shape[0])
-                nt = int(patch.shape[1])
+                t1 = time()
+                t_gauss += t1-t0
+                t0 = t1
+
+                patch = q * pgauss * tgauss
+
+                t1 = time()
+                t_patch += t1-t0
+                t0 = t1
                 
-                work_r[ip:ip+np, it:it+nt] += patch
-                qtot += float(q)
+                work_r[pbin0[ind]:pbin0[ind]+patch.shape[0],
+                       tbin0[ind]:tbin0[ind]+patch.shape[1]] += patch
+
+                t1 = time()
+                t_sum += t1-t0
+                t0 = t1
 
             t1 = time()
             t_raster += t1-t0
@@ -112,10 +131,10 @@ class Ductor(object):
             t1 = time()
             t_conv2 += t1-t0
 
-            print ("imp:",imp, patch_tot, torch.sum(volts), torch.sum(tmp))
+            print ("imp:",imp, torch.sum(volts), torch.sum(tmp))
 
 
+        print ("times: conv1:%.6f conv2:%.6f ls:%.6f mg:%.6f gauss:%.6f patch:%.6f sum:%.6f" %
+               (t_conv1, t_conv2, t_ls, t_mg, t_gauss, t_patch, t_sum))
 
-        print ("qtot",qtot,"patch tot",patch_tot)
-        print ("raster:",t_raster,"t_conv1",t_conv1,"t_conv2",t_conv2)
         return dict(signals=volts)

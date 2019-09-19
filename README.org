@@ -21,3 +21,16 @@ Some expensive WCT algorithms are amenable to running on GPU.  This package prot
   $ python setup.py develop
   $ cold --help
 #+end_example
+
+* Performance
+
+CPU
+#+begin_example
+times: conv1:0.506732 conv2:2.654418 ls:12.345227 mg:4.246980 gauss:22.894458 sum:12.477100
+#+end_example
+
+CUDA:
+#+begin_example
+times: conv1:0.002414 conv2:0.004040 ls:42.054190 mg:5.745139 gauss:61.036936 sum:42.312326
+times: conv1:0.002346 conv2:0.004523 ls:43.305027 mg:6.116210 gauss:62.809590 patch:6.090205 sum:55.193184
+#+end_example
