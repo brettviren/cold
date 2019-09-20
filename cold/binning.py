@@ -2,7 +2,7 @@
 '''
 Things related to binnings.
 '''
-
+import numpy
 import torch
 class Binning(object):
     '''
@@ -20,6 +20,11 @@ class Binning(object):
     @property
     def binsize(self):
         return self.span / self.nbins
+
+    def linspace(self, device=None):
+        if device is None:
+            return numpy.linspace(self.minedge, self.maxedge, self.nbins+1)
+        return torch.linspace(self.minedge, self.maxedge, self.nbins+1, device=device)
 
     def inside(self, pos):
         if type(pos) == float:

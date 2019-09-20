@@ -24,6 +24,9 @@ Some expensive WCT algorithms are amenable to running on GPU.  This package prot
 
 * Performance
 
+GPU is much slower than CPU....
+
+
 CPU
 #+begin_example
 times: conv1:0.506732 conv2:2.654418 ls:12.345227 mg:4.246980 gauss:22.894458 sum:12.477100
@@ -33,4 +36,47 @@ CUDA:
 #+begin_example
 times: conv1:0.002414 conv2:0.004040 ls:42.054190 mg:5.745139 gauss:61.036936 sum:42.312326
 times: conv1:0.002346 conv2:0.004523 ls:43.305027 mg:6.116210 gauss:62.809590 patch:6.090205 sum:55.193184
+#+end_example
+
+Try a different strategy of splatting the Gaussian depos on a monolithic
+~10*nwires*nticks~ 2D array.
+
+CPU:
+#+begin_example
+           broadcast: 0.2544
+               gauss: 2.5069
+                init: 0.0208
+                  ls: 0.9028
+                 sum: 1.5572
+#+end_example
+
+CUDA:
+#+begin_example
+           broadcast: 0.3371
+               gauss: 6.5323
+                init: 0.0005
+                  ls: 3.4365
+                 sum: 5.5697
+#+end_example
+
+Except for allocating the initial array ("init"), CPU wins.  GPU job takes 813 MB on the GPU.
+
+Make things more monolithic, still CPU wins
+
+CPU
+#+begin_example
+               gauss: 3.0514
+                init: 0.0225
+                mult: 0.1654
+               patch: 0.4848
+                 sum: 0.9196
+#+end_example
+
+CUDA
+#+begin_example
+               gauss: 9.3494
+                init: 0.0005
+                mult: 0.5165
+               patch: 1.7573
+                 sum: 4.5056
 #+end_example

@@ -4,7 +4,102 @@ Raster 2D Gaussian distributions.
 '''
 
 import math
+from time import time
+from collections import defaultdict
+from .util import gauss
 import torch
+
+
+
+class Timer(object):
+    def __init__(self):
+        self.times = defaultdict(float)
+        self.start()
+    def start(self):
+        self.t0 = time()
+    def __call__(self, key):
+        now = time()
+        self.times[key] += now-self.t0
+        self.t0 = now
+    def __str__(self):
+        l = list()
+        for k,t in sorted(self.times.items()):
+            l.append("%20s: %0.4f" % (k,t))
+        return '\n'.join(l)
+
+
+class Splat(object):
+
+    tbinning = None
+    pbinning = None
+
+    def __init__(self, pimpos, tbinning, **params):
+        self.tbinning = tbinning
+        self.pimpos = pimpos
+        self.__dict__.update(**params)
+
+    def __call__(self, Qdrift,
+                 Tdrift, dT,
+                 Pdrift, dP, 
+                 tbins, tspan,
+                 pbins, pspan, **kwds):
+
+        nimper = self.pimpos.nimper 
+
+        tmin,tmax = tspan.T
+        it, nt = tbins.T
+
+        pmin,pmax = pspan.T
+        pbin0,pnbins = pbins.T
+
+        ip = pbin0 * nimper
+        np = pnbins * nimper
+
+        t_ls = 0.0
+        t_gaus = 0.0
+        t_bc = 0.0
+        t_sum = 0.0
+        
+        timer = Timer()
+
+        pls = self.pimpos.impact_binning.linspace(device=Qdrift.device)
+        tls = self.tbinning.linspace(device=Qdrift.device)
+        
+        ion = torch.zeros((self.pimpos.impact_binning.nbins, self.tbinning.nbins),
+                          dtype=torch.float, device=Qdrift.device)
+        print ("ion array shape:", ion.shape)
+        timer("init")
+
+        for ind, q in enumerate(Qdrift):
+
+
+            this_ip = ip[ind]
+            this_it = it[ind]
+
+            this_np = np[ind]
+            this_nt = nt[ind]
+
+            pgauss = gauss(Pdrift[ind], dP[ind], pls[this_ip:this_ip+this_np])
+            tgauss = gauss(Tdrift[ind], dT[ind], tls[this_it:this_it+this_nt]) * q
+            timer("gauss")
+
+            patch = torch.broadcast_tensors(pgauss.view(this_np, 1), tgauss.view(1, this_nt))
+            timer("patch")
+
+            patch = patch[0] * patch[1]
+            timer("mult")
+            # pgauss = gauss(Pdrift[ind], dP[ind], pmg[this_ip:this_ip+this_np,this_it:this_it+this_nt])
+            # tgauss = gauss(Tdrift[ind], dT[ind], tmg[this_ip:this_ip+this_np,this_it:this_it+this_nt])
+            # patch = q * pgauss * tgauss
+
+            ion[this_ip:this_ip+this_np,this_it:this_it+this_nt] += patch
+
+            timer("sum")
+            
+
+        print (timer)
+        return dict(ion=ion)
+
 
 
 

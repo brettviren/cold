@@ -75,7 +75,7 @@ def check_test(device, wires_file, response_file, bee_file):
     chirp('warm up device "%s", reset time' % device)
     chirp.reset()
 
-    from cold import io, drift, wires, units, binning, ductor
+    from cold import io, drift, wires, units, binning, ductor, splat
 
     # detector description.  fixme: refactor this to come from a cold.detectors.<name>.Geometry object
     wire_plane = (1,0) # fixme: we just look at one plane now
@@ -103,7 +103,8 @@ def check_test(device, wires_file, response_file, bee_file):
     pitcher = drift.Pitcher(pimpos)
     tbinner = binning.WidthBinning(tbinning)
     pbinner = binning.WidthBinning(pimpos.region_binning)
-    duct = ductor.Ductor(pimpos, tbinning, res0)
+    #duct = ductor.Ductor(pimpos, tbinning, res0)
+    duct = splat.Splat(pimpos, tbinning)
     chirp("make nodes")
 
     # run graph
@@ -143,7 +144,7 @@ def check_test(device, wires_file, response_file, bee_file):
                    tbins['bins'], tbins['span'],
                    pbins['bins'], pbins['span'])
 
-    print (signals)
+    #print (signals)
     chirp("done")
 
 
