@@ -24,7 +24,9 @@ Some expensive WCT algorithms are amenable to running on GPU.  This package prot
 
 * Performance
 
-GPU is much slower than CPU....
+It's a backwards universe.  GPU is slower than CPU, C++ is slower than Python (some caveats may apply).
+
+** GPU/CPU
 
 
 CPU
@@ -80,3 +82,95 @@ CUDA
                patch: 1.7573
                  sum: 4.5056
 #+end_example
+
+** GPU/CPU and Python/C++
+
+Simple test of calling ~exp()~ on arrays with ~test_arrexp.{py,cxx}~.
+
+GPU and CPU in PyCUDA and Numpy on 25M floats (kHz is kilo-points per second, time in us for the operation, the ~rss[M]~ measure is the system memory usage)
+
+#+begin_example
+$ python test/test_arrexp.py
+rss[M]: 161.517568
+allocate[kHz]: 9964.058, time[us]: 2509.018
+rss[M]: 361.791488
+gpu speed[kHz]: 126436.674, time[us]: 197.727
+rss[M]: 367.398912
+cpu speed[kHz]: 68196.694, time[us]: 366.587
+rss[M]: 467.828736
+#+end_example
+
+The allocation step includes random number generating.
+
+A similar calculation of 25M floats in C++:
+
+#+begin_example
+$ g++ -std=c++17 -O3 -o test_arrexp test/test_arrexp.cxx
+$ ./test_arrexp 
+cpp speed[kHz]: 51962.5, time[us]: 481.116
+#+end_example
+
+GPU is faster only if array is large enough.  Here is same two calculations using 1M floats.
+
+#+begin_example
+$ python test/test_arrexp.py
+rss[M]: 161.611776
+allocate[kHz]: 12996.285, time[us]: 76.945
+rss[M]: 178.01216
+gpu speed[kHz]: 6490.761, time[us]: 154.065
+rss[M]: 181.071872
+cpu speed[kHz]: 54354.301, time[us]: 18.398
+rss[M]: 193.445888
+$ ./test_arrexp 
+cpp speed[kHz]: 50519.1, time[us]: 19.7945
+#+end_example
+
+** GPU/CPU hybrid
+
+One benefit of PyTorch is to mix/match what goes on GPU or CPU.  
+
+
+#+begin_example
+$ cold test --work-shape 1170 6200 -d cpu data/protodune-wires-larsoft-v1.txt data/pdsp.npz data/0-truthDepo.json 
+stest:      0.000 (+0.000247): warm up device "cpu", reset time
+work shape:  (1280, 6272)
+stest:      1.253 (+1.253088): load 'geometry'
+stest:      1.263 (+0.009805): load response
+stest:      1.814 (+0.551084): make nodes
+stest:      1.838 (+0.023723): load points
+stest:      1.839 (+0.001555): drifted and pitched
+stest:      1.841 (+0.002216): binned
+               gauss: 2.8250
+                init: 0.0250
+                mult: 0.1646
+               patch: 0.4480
+                 sum: 0.8301
+stest:      6.135 (+4.293266): splatted
+stest:      7.863 (+1.728735): done
+
+$ cold test --work-shape 1170 6200 -d cuda data/protodune-wires-larsoft-v1.txt data/pdsp.npz data/0-truthDepo.json 
+stest:      4.667 (+4.666625): warm up device "cuda", reset time
+work shape:  (1280, 6272)
+stest:      1.379 (+1.378521): load 'geometry'
+stest:      1.388 (+0.009875): load response
+stest:      1.435 (+0.046152): make nodes
+stest:      1.457 (+0.022485): load points
+stest:      1.459 (+0.001473): drifted and pitched
+stest:      1.461 (+0.002437): binned
+               gauss: 3.5291
+                init: 0.0213
+                mult: 0.2134
+               patch: 0.5509
+                 sum: 0.9996
+stest:      6.775 (+5.314530): splatted
+stest:      6.932 (+0.156778): done
+#+end_example
+
+Notes:
+
+- second run is the hybrid
+- the time keeper resets after "hybrid"
+- the one time FFT of the response function is dune as part of "make nodes" which is why hybrid sees some early speed increase
+
+If we discount one time start up (start from "load points") then CPU
+takes 6.049s and hybrid takes 5.497s, barely 10%....

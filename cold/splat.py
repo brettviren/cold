@@ -67,7 +67,7 @@ class Splat(object):
         
         ion = torch.zeros((self.pimpos.impact_binning.nbins, self.tbinning.nbins),
                           dtype=torch.float, device=Qdrift.device)
-        print ("ion array shape:", ion.shape)
+        #print ("ion array shape:", ion.shape)
         timer("init")
 
         for ind, q in enumerate(Qdrift):

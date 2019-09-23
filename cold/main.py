@@ -66,85 +66,93 @@ def check_bee(device, bee_file, pdf_file):
 @click.option("-d","--device", default="cuda",
               type=click.Choice(['cuda','cpu']),
               help="the 'gpu' device to use")
+@click.option("--work-shape", default=(2048, 8192),
+              nargs=2,
+              help="number of columns/wires and rows/ticks for convolution")
 @click.argument("wires-file")
 @click.argument("response-file")
 @click.argument("bee-file")
-def check_test(device, wires_file, response_file, bee_file):
+def check_test(device, work_shape, wires_file, response_file, bee_file):
     chirp = Chirp("stest: ")
     torch.tensor([0,], device=device)
     chirp('warm up device "%s", reset time' % device)
     chirp.reset()
 
-    from cold import io, drift, wires, units, binning, ductor, splat
+    from cold import io, drift, wires, units, binning, ductor, splat, ifconv, util
+
+    work_shape = tuple(map(util.fftsize, work_shape))
+    print ("work shape: ", work_shape)
 
     # detector description.  fixme: refactor this to come from a cold.detectors.<name>.Geometry object
     wire_plane = (1,0) # fixme: we just look at one plane now
-    chmap = wires.pdsp_channel_map(wires_file, device)
+    chmap = wires.pdsp_channel_map(wires_file, 'cpu')
     all_pimpos = wires.pdsp_pimpos(chmap)
     pimpos = all_pimpos[wire_plane]  
     tbinning = binning.Binning(6000,0,3*units.ms)
     bbs = wires.pdsp_bounds(chmap)
     bb0 = bbs[wire_plane]
-    print ("bb0[m]:",bb0.minp/units.m, bb0.maxp/units.m)
-    print ("pitch[mm]:",
-            pimpos.region_binning.minedge*units.mm,
-            pimpos.region_binning.maxedge*units.mm)
+    # print ("bb0[m]:",bb0.minp/units.m, bb0.maxp/units.m)
+    # print ("pitch[mm]:",
+    #         pimpos.region_binning.minedge*units.mm,
+    #         pimpos.region_binning.maxedge*units.mm)
     chirp("load 'geometry'")
 
     # response data
     res = numpy.load(response_file)
     # fixme: we just look at one plane now
-    res0 = torch.tensor(res['resp0'], dtype=torch.float, device=device) 
+    res0 = torch.tensor(res['resp0'], dtype=torch.float, device='cpu') 
     chirp("load response")
 
     # nodes
-    bee = io.BeeFiles(device=device)
+    bee = io.BeeFiles(device='cpu')
     drifter = drift.Drifter(respx = pimpos.origin[0] + 10*units.cm, positive_facing=True) # fixme
     pitcher = drift.Pitcher(pimpos)
     tbinner = binning.WidthBinning(tbinning)
     pbinner = binning.WidthBinning(pimpos.region_binning)
     #duct = ductor.Ductor(pimpos, tbinning, res0)
-    duct = splat.Splat(pimpos, tbinning)
+    splat = splat.Splat(pimpos, tbinning)
+    duct = ifconv.Ductor(pimpos.nimper, res0, work_shape, device=device)
     chirp("make nodes")
 
     # run graph
     points = bee(bee_file)
     xyzq = torch.stack((points['x'], points['y'], points['z'], points['q'])).T
-    print("all points:",xyzq.shape[0])
+    #print("all points:",xyzq.shape[0])
     intpc = bb0.inside(xyzq[:,:3])
     xyzq = xyzq[intpc,:]
-    print("points in TPC:",xyzq.shape[0])
+    #print("points in TPC:",xyzq.shape[0])
     assert xyzq.shape[0] > 0
 
     x,y,z,q = xyzq.T
     t = torch.zeros_like(x)
-    print ("x[m]:", torch.min(x)/units.m, torch.max(x)/units.m)
+    #print ("x[m]:", torch.min(x)/units.m, torch.max(x)/units.m)
     chirp("load points")
 
     drifted = drifter(x, t, q)
     pitched = pitcher(y,z)
 
-    print ("Pdrift[mm]:",torch.min(pitched['Pdrift']), torch.max(pitched['Pdrift']))
-    print ("<dP[mm]>:",torch.sum(drifted['dP']*units.mm)/len(drifted['dP']))
-    print ("Tdrift[us]:",torch.min(drifted['Tdrift']), torch.max(drifted['Tdrift']))
-    print ("<dT[us]>:",torch.sum(drifted['dT']*units.us)/len(drifted['dT']))
+    # print ("Pdrift[mm]:",torch.min(pitched['Pdrift']), torch.max(pitched['Pdrift']))
+    # print ("<dP[mm]>:",torch.sum(drifted['dP']*units.mm)/len(drifted['dP']))
+    # print ("Tdrift[us]:",torch.min(drifted['Tdrift']), torch.max(drifted['Tdrift']))
+    # print ("<dT[us]>:",torch.sum(drifted['dT']*units.us)/len(drifted['dT']))
     chirp("drifted and pitched")
 
     tbins = tbinner(drifted['Tdrift'], drifted['dT'])
     pbins = pbinner(pitched['Pdrift'], drifted['dP'])
     chirp("binned")
 
-    print (drifted['Tdrift'], drifted['dT'])
-    print (tbins)
+
+    splatted = splat(drifted['Qdrift'],
+                     drifted['Tdrift'], drifted['dT'],
+                     pitched['Pdrift'], drifted['dP'],
+                     tbins['bins'], tbins['span'],
+                     pbins['bins'], pbins['span'])
 
 
-    signals = duct(drifted['Qdrift'],
-                   drifted['Tdrift'], drifted['dT'],
-                   pitched['Pdrift'], drifted['dP'],
-                   tbins['bins'], tbins['span'],
-                   pbins['bins'], pbins['span'])
+    chirp("splatted")
 
-    #print (signals)
+    ducted = duct(splatted['ion'])
+
     chirp("done")
 
 
