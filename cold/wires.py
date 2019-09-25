@@ -52,6 +52,8 @@ class Pimpos(object):
         origin is a 3D point from which all vectors in the Pimpos
         coordinate system are relative.
         '''
+        self._params = dict(nwires=nwires, endwires=endwires, origin=origin, nimper=nimper)
+
         w0, wL = endwires
         self.axis = torch.zeros(9, dtype=endwires.dtype, device=endwires.device).reshape((3,3))
         self.axis[0][0] = 1.0;  # X-axis
@@ -92,7 +94,6 @@ class Pimpos(object):
         v = points - self.origin
         return torch.sum(v * self.axis[2], points.dim()-1)
         
-
 
 # detector description.  fixme: refactor this to come from a cold.detectors.<name>.Geometry object
 

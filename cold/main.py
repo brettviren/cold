@@ -5,7 +5,6 @@ Main CLI interface to COLD
 import math
 import time
 import click
-import torch
 import numpy
 import matplotlib.pyplot as plt
 from collections import namedtuple
@@ -17,8 +16,13 @@ from .util import Chirp
 def cli(ctx):
     pass
 
+
+
+
 @cli.command("check-torch")
 def check_torch():
+    import torch
+
     if torch.cuda.is_available():
         ncuda = torch.cuda.device_count()
         click.echo ("have %d CUDA devices:" % ncuda)
@@ -40,6 +44,7 @@ def check_bee(device, bee_file, pdf_file):
     '''
     Load a bee file, plot it
     '''
+    import torch
     chirp = Chirp("bee: ")
     torch.tensor([0,], device=device)
     chirp('warm up device "%s", reset time' % device)
@@ -73,12 +78,13 @@ def check_bee(device, bee_file, pdf_file):
 @click.argument("response-file")
 @click.argument("bee-file")
 def check_test(device, work_shape, wires_file, response_file, bee_file):
+    import torch
     chirp = Chirp("stest: ")
     torch.tensor([0,], device=device)
     chirp('warm up device "%s", reset time' % device)
     chirp.reset()
 
-    from cold import io, drift, wires, units, binning, ductor, splat, ifconv, util
+    from cold import io, drift, wires, units, binning, ductor, splat, ifconv, util, bypixel, bydepo
 
     work_shape = tuple(map(util.fftsize, work_shape))
     print ("work shape: ", work_shape)
@@ -110,7 +116,9 @@ def check_test(device, work_shape, wires_file, response_file, bee_file):
     tbinner = binning.WidthBinning(tbinning)
     pbinner = binning.WidthBinning(pimpos.region_binning)
     #duct = ductor.Ductor(pimpos, tbinning, res0)
-    splat = splat.Splat(pimpos, tbinning)
+    #splat = splat.Splat(pimpos, tbinning)
+    # splat = bypixel.Splat(pimpos, tbinning)
+    splat = bydepo.Splat(pimpos, tbinning)
     duct = ifconv.Ductor(pimpos.nimper, res0, work_shape, device=device)
     chirp("make nodes")
 
@@ -142,18 +150,22 @@ def check_test(device, work_shape, wires_file, response_file, bee_file):
     chirp("binned")
 
 
+    # splatted = splat(drifted['Qdrift'],
+    #                  drifted['Tdrift'], drifted['dT'],
+    #                  pitched['Pdrift'], drifted['dP'],
+    #                  tbins['bins'], tbins['span'],
+    #                  pbins['bins'], pbins['span'])
+
     splatted = splat(drifted['Qdrift'],
                      drifted['Tdrift'], drifted['dT'],
-                     pitched['Pdrift'], drifted['dP'],
-                     tbins['bins'], tbins['span'],
-                     pbins['bins'], pbins['span'])
+                     pitched['Pdrift'], drifted['dP'])
 
 
     chirp("splatted")
 
-    ducted = duct(splatted['ion'])
+    # ducted = duct(splatted['ion'])
 
-    chirp("done")
+    # chirp("done")
 
 
 

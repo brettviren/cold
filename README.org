@@ -174,3 +174,18 @@ Notes:
 
 If we discount one time start up (start from "load points") then CPU
 takes 6.049s and hybrid takes 5.497s, barely 10%....
+
+** New approach
+
+The problem with the Gaussian raster is the shape of the data.  The 2D
+Gaussians are represented by an ~(N,5)~ array (amplitude, 2 means, 2
+sigmas) and each gets expanded to a different shaped 2D raster patch
+(eg, limited by 3 sigma) *and* each of these raster patches must be
+added to a large, common output 2D array ~(nimper*nwires, nticks)~ and
+that sum is not thread safe.  An algorithm following that description
+is not very GPU'able.
+
+Turning the problem around and calculating the output array one pixel
+at a time where each pixel is a loop over all ~(N,5)~ Gaussians would be
+very parallelizable.  Two difficulties: RAM usage and requiring
+more detailed CUDA programming than I've done so far.
